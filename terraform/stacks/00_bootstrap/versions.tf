@@ -10,16 +10,17 @@ terraform {
     }
   }
 
-  # State is local until the bucket below exists — this is the stack that creates it.
-  # After the apply that creates aws_s3_bucket.state, uncomment this block and run:
+  # This stack ran on local state until it had created aws_s3_bucket.state, then moved
+  # into it. Cloning fresh? Start the same way: comment this block out for the first
+  # apply, then put it back and run
   #
   #   cp backend.hcl.example backend.hcl   # fill in from `terraform output`
   #   terraform init -backend-config=backend.hcl -migrate-state
   #
-  # The settings live in backend.hcl rather than here because the bucket name contains
-  # the account ID, and that does not belong in the repository.
-  #
-  # backend "s3" {}
+  # The settings are deliberately empty here and live in backend.hcl instead, because
+  # the bucket name contains the account ID and that does not belong in the repository.
+  # Locking is the backend's own (use_lockfile), set in backend.hcl.
+  backend "s3" {}
 }
 
 provider "aws" {
