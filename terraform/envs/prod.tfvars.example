@@ -1,0 +1,16 @@
+# Copy to prod.tfvars. *.tfvars is gitignored; only the .example files are committed.
+#
+# Used as: terraform apply -var-file=../../envs/prod.tfvars
+#
+# Do not leave prod running to demo it. Use dev, and destroy it afterwards.
+
+project = "slipway"
+region  = "us-east-1"
+
+ecr_repository_name = "slipway-app"
+
+memory_size = 1024
+timeout     = 30
+
+# Longer than dev: when something breaks in prod you want the logs to still be there.
+log_retention_days = 30

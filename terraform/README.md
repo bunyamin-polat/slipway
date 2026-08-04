@@ -18,14 +18,14 @@ committed.
 | --- | --- | --- | --- |
 | `00_bootstrap` | Once per account | Local, then migrated to S3 | Budget alarm, remote state bucket, ECR repository |
 | `10_network` | Only if you need a VPC | S3 | VPC, subnets, NAT — most apps do not need this, and a NAT gateway costs about $32/month |
-| `20_app` | Per environment | S3, one workspace per environment | Lambda + Function URL, static site, data bucket, secrets |
+| `20_app` | Per environment | S3, one workspace per environment | Lambda + Function URL today; static site, data bucket and secrets as they are needed |
 
 ## Modules
 
 | Module | Status | What it does |
 | --- | --- | --- |
 | `budget` | ✅ built | Monthly cost budget with email alerts. Apply before anything else. |
-| `lambda_container` | planned | ECR image → Lambda with the Web Adapter and response streaming, IAM, log group |
+| `lambda_container` | ✅ built | ECR image → Lambda with the Web Adapter and response streaming, Function URL, scoped IAM, log group with retention |
 | `static_site` | planned | S3 + CloudFront + OAC, invalidation on deploy |
 | `data_bucket` | planned | Application storage, lifecycle rules, encryption |
 | `secrets` | planned | Secrets Manager / SSM parameters plus the IAM policy to read them |

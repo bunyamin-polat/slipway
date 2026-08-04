@@ -1,0 +1,15 @@
+# Copy to dev.tfvars. *.tfvars is gitignored; only the .example files are committed.
+#
+#   cp dev.tfvars.example dev.tfvars
+#
+# Used as: terraform apply -var-file=../../envs/dev.tfvars
+
+project = "slipway"
+region  = "us-east-1"
+
+ecr_repository_name = "slipway-app"
+
+# Cheap and disposable. dev exists to be destroyed and rebuilt.
+memory_size        = 1024
+timeout            = 30
+log_retention_days = 7

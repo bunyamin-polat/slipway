@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Tear an environment down completely, with a confirmation you have to mean.
+
+    uv run python scripts/destroy.py dev
+
+This is not the afterthought half of deploy. Every environment you cannot confidently
+destroy is a subscription you did not intend to buy, and the way you find out whether
+destroy works is by running it — ideally the same day you built the thing.
+
+Afterwards it checks AWS directly rather than trusting Terraform's word for it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+import boto3
+from _common import (
+    APP_STACK,
+    DeployError,
+    aws_identity,
+    backend_config,
+    detail,
+    fail,
+    require_environment,
+    select_workspace,
+    step,
+    terraform,
+    tfvars_file,
+    timed,
+)
+
+
+def confirm(environment: str, function_name: str) -> bool:
+    """Make the user type the environment name. A y/n prompt is muscle memory; this is not."""
+    print(f"\n\033[1mAbout to destroy the {environment} environment.\033[0m")
+    print(f"  Lambda function : {function_name}")
+    print("  Its log group, IAM role and Function URL go with it.")
+    print("  The ECR images and the state bucket are NOT touched.\n")
+
+    answer = input(f"Type {environment!r} to confirm: ").strip()
+    return answer == environment
+
+
+def survivors(function_name: str, region: str) -> list[str]:
+    """Ask AWS what is left, instead of believing the exit code."""
+    remaining: list[str] = []
+
+    lambda_client = boto3.client("lambda", region_name=region)
+    try:
+        lambda_client.get_function(FunctionName=function_name)
+        remaining.append(f"lambda function {function_name}")
+    except lambda_client.exceptions.ResourceNotFoundException:
+        pass
+
+    logs = boto3.client("logs", region_name=region)
+    groups = logs.describe_log_groups(logGroupNamePrefix=f"/aws/lambda/{function_name}")
+    remaining += [f"log group {g['logGroupName']}" for g in groups.get("logGroups", [])]
+
+    return remaining
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("environment", help="dev, test or prod")
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt. For CI teardown only.",
+    )
+    args = parser.parse_args()
+
+    try:
+        environment = require_environment(args.environment)
+        var_file = tfvars_file(environment)
+        backend = backend_config(APP_STACK)
+
+        step("Checking AWS credentials")
+        account_id, region = aws_identity()
+        detail(f"account {account_id} · region {region} · environment {environment}")
+
+        function_name = f"slipway-{environment}-app"
+
+        if not args.yes and not confirm(environment, function_name):
+            print("Not confirmed. Nothing was destroyed.")
+            return 1
+
+        step("Destroying")
+        terraform(["init", "-input=false", f"-backend-config={backend}"], APP_STACK)
+        select_workspace(environment, APP_STACK)
+
+        with timed("terraform destroy"):
+            terraform(
+                [
+                    "destroy",
+                    "-input=false",
+                    "-auto-approve",
+                    f"-var-file={var_file}",
+                ],
+                APP_STACK,
+            )
+
+        step("Verifying against AWS")
+        left = survivors(function_name, region)
+        if left:
+            print("\n\033[31mStill present:\033[0m", file=sys.stderr)
+            for item in left:
+                print(f"  - {item}", file=sys.stderr)
+            print(
+                "\nDestroy reported success but AWS disagrees. Check the console.",
+                file=sys.stderr,
+            )
+            return 1
+
+        detail("nothing left: no function, no log group")
+        detail("ECR images remain, subject to the lifecycle policy that keeps the last 10")
+        detail("the budget alarm and the state bucket are account-level and stay")
+
+    except DeployError as exc:
+        return fail(exc)
+    except KeyboardInterrupt:
+        print(
+            "\nInterrupted. The environment may be half-destroyed — run this again.",
+            file=sys.stderr,
+        )
+        return 130
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
