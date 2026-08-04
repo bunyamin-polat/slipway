@@ -1,0 +1,108 @@
+# ---------------------------------------------------------------------------
+# Local-only working files (deliberately not published)
+# ---------------------------------------------------------------------------
+CLAUDE.md
+.claude/
+NOTES.md
+scratch/
+
+# ---------------------------------------------------------------------------
+# Terraform — the section that matters most here
+# ---------------------------------------------------------------------------
+# Real variable values (account IDs, ARNs, alert emails) never go in git.
+# Only the *.tfvars.example files are committed.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Backend config holds the state bucket name, which contains the account ID
+backend.hcl
+!backend.hcl.example
+
+# Provider plugins, state and plans
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+plan.out
+crash.log
+crash.*.log
+
+# Local CLI config and overrides
+.terraformrc
+terraform.rc
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.tflint.d/
+
+# NOTE: .terraform.lock.hcl IS committed on purpose — it pins provider
+# versions so CI and every machine resolve the same ones.
+
+# ---------------------------------------------------------------------------
+# AWS, secrets, credentials
+# ---------------------------------------------------------------------------
+.aws/
+credentials
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+
+# Virtual environments — machine-specific binaries. uv.lock is what makes
+# installs reproducible, and uv.lock IS committed.
+.venv/
+venv/
+env/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# NOTE: uv.lock and .python-version ARE committed.
+
+# ---------------------------------------------------------------------------
+# Docker and build artifacts
+# ---------------------------------------------------------------------------
+*.tar
+lambda.zip
+*.zip
+
+# ---------------------------------------------------------------------------
+# Node / frontend build (Dockerfile.fullstack's first stage)
+# ---------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+.pnpm-store/
+npm-debug.log*
+yarn-error.log*
+
+# ---------------------------------------------------------------------------
+# Editors and OS
+# ---------------------------------------------------------------------------
+.DS_Store
+.vscode/
+.idea/
+*.swp
