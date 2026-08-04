@@ -1,0 +1,9 @@
+# Build context is this directory. Everything here ends up in the image layer cache,
+# so keep it to what the container actually needs.
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+*.md

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slipway — example app</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 16px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    max-width: 46rem; margin: 4rem auto; padding: 0 1.5rem;
+  }
+  h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 .25rem; }
+  p.sub { margin: 0 0 2rem; opacity: .65; font-size: .85rem; }
+  button {
+    font: inherit; padding: .5rem 1.1rem; cursor: pointer;
+    border: 1px solid currentColor; border-radius: 6px; background: none; color: inherit;
+  }
+  button[disabled] { opacity: .4; cursor: default; }
+  #out {
+    margin-top: 1.5rem; min-height: 5rem; padding: 1rem;
+    border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 6px;
+  }
+  #out span { opacity: 0; animation: in .2s forwards; }
+  @keyframes in { to { opacity: 1 } }
+  #stats { margin-top: 1rem; font-size: .8rem; opacity: .65; }
+  #stats b { font-weight: 600; opacity: 1; }
+</style>
+</head>
+<body>
+  <h1>Slipway</h1>
+  <p class="sub">The example app. One streaming endpoint, one static page, no AI —
+    its only job is to prove the deployment works.</p>
+
+  <button id="go">Stream</button>
+  <div id="out"></div>
+  <div id="stats"></div>
+
+<script>
+const btn = document.getElementById("go");
+const out = document.getElementById("out");
+const stats = document.getElementById("stats");
+
+btn.addEventListener("click", () => {
+  btn.disabled = true;
+  out.textContent = "";
+  stats.textContent = "";
+
+  const started = performance.now();
+  let first = null;
+  let words = 0;
+
+  const es = new EventSource("/api/stream");
+
+  es.onmessage = (event) => {
+    if (event.data === "[DONE]") {
+      es.close();
+      btn.disabled = false;
+      const total = Math.round(performance.now() - started);
+      // If first-token and total are the same number, the response was buffered:
+      // AWS_LWA_INVOKE_MODE=response_stream is missing.
+      stats.innerHTML =
+        `first word <b>${Math.round(first)} ms</b> · ` +
+        `${words} words · total <b>${total} ms</b>` +
+        (first > total * 0.8 ? " · <b>buffered, not streamed</b>" : " · streamed");
+      return;
+    }
+    if (first === null) first = performance.now() - started;
+    words++;
+    const span = document.createElement("span");
+    span.textContent = event.data + " ";
+    out.appendChild(span);
+  };
+
+  es.onerror = () => {
+    es.close();
+    btn.disabled = false;
+    stats.textContent = "stream failed — check the container logs";
+  };
+});
+</script>
+</body>
+</html>

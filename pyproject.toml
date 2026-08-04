@@ -5,8 +5,10 @@ description = "AWS deployment blueprint: Terraform modules, deploy scripts and G
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "black>=26.5.1",
     "boto3>=1.35",
     "httpx>=0.28",
+    "isort>=8.0.1",
     "pyyaml>=6.0",
 ]
 

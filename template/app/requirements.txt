@@ -1,0 +1,5 @@
+# Pinned on purpose: an image that builds differently next month is not a deployment
+# artifact, it is a lottery ticket. The repo's own tooling uses uv and pyproject.toml;
+# this file belongs to the container and stays deliberately minimal.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
