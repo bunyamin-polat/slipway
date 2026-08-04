@@ -72,6 +72,12 @@ def build(native: bool) -> None:
     cmd = ["docker", "build"]
     if not native:
         cmd += ["--platform", LAMBDA_PLATFORM]
+    # Docker 28 attaches provenance and SBOM attestations by default, which turns the
+    # image into a manifest index carrying an `unknown/unknown` entry. Lambda cannot
+    # resolve that and rejects the image with "media type ... is not supported" —
+    # a message that mentions nothing about attestations. Same flags as the deploy
+    # path, so what runs here is what gets pushed.
+    cmd += ["--provenance=false", "--sbom=false"]
     cmd += ["-f", str(DOCKERFILE), "-t", IMAGE, str(BUILD_CONTEXT)]
     run(cmd)
 
