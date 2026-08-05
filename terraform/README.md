@@ -8,9 +8,12 @@ create resources. Nothing here is applied directly.
 **`stacks/`** — the things you actually apply. Each owns its own state file and composes
 modules into something deployable. Numbered by the order they are applied in.
 
-Environment-specific values (account IDs, domain names, budget limits) appear **only** in
-stacks, through `*.tfvars` files that are gitignored. Only `*.tfvars.example` is
-committed.
+Environment-specific values for `20_app` come from **`slipway.yaml`** at the repository
+root: `deploy.py` resolves it for the environment and passes the values as `-var` flags.
+There are no `*.tfvars` for the app stack — one file, one place for a value to be wrong.
+
+`00_bootstrap` is the exception. It runs once per account, by hand, before any script
+exists, so it keeps a gitignored `terraform.tfvars` of its own.
 
 ## Stacks, in order
 

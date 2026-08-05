@@ -12,24 +12,140 @@ import mimetypes
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import boto3
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TERRAFORM_DIR = REPO_ROOT / "terraform"
-ENVS_DIR = TERRAFORM_DIR / "envs"
 APP_STACK = TERRAFORM_DIR / "stacks" / "20_app"
-BUILD_CONTEXT = REPO_ROOT / "template"
-DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.fastapi"
-STATIC_DIR = REPO_ROOT / "template" / "app" / "static"
+CONFIG_FILE = REPO_ROOT / "slipway.yaml"
 
-ENVIRONMENTS = ("dev", "test", "prod")
 LAMBDA_PLATFORM = "linux/amd64"
 
 
 class DeployError(Exception):
     """Something went wrong that the user needs to read, not a stack trace."""
+
+
+@dataclass(frozen=True)
+class Config:
+    """`slipway.yaml`, resolved for one environment.
+
+    The whole point of the file is that an application fills in one thing rather than
+    hunting through scripts and tfvars for the four places a name is written down.
+    """
+
+    name: str
+    region: str
+    environment: str
+
+    repository: str
+    dockerfile: Path
+    context: Path
+    static_dir: Path
+
+    compute_target: str
+    memory: int
+    timeout: int
+    apprunner_cpu: str
+    apprunner_memory: str
+
+    cdn: bool
+    cdn_price_class: str
+    observability: bool
+    log_retention_days: int
+    alert_emails: list[str]
+
+    @property
+    def resource_prefix(self) -> str:
+        return f"{self.name}-{self.environment}"
+
+    def terraform_vars(self, image_tag: str) -> list[str]:
+        """Terraform's `-var` flags, generated rather than kept in a second file.
+
+        This is what replaced `envs/*.tfvars`. Two sources of truth for the same value is
+        worse than none: one of them is always the stale one, and it is never the one you
+        are looking at.
+        """
+        emails = json.dumps(self.alert_emails)
+        return [
+            f"-var=project={self.name}",
+            f"-var=region={self.region}",
+            f"-var=ecr_repository_name={self.repository}",
+            f"-var=image_tag={image_tag}",
+            f"-var=compute_target={self.compute_target}",
+            f"-var=memory_size={self.memory}",
+            f"-var=timeout={self.timeout}",
+            f"-var=apprunner_cpu={self.apprunner_cpu}",
+            f"-var=apprunner_memory={self.apprunner_memory}",
+            f"-var=enable_cdn={str(self.cdn).lower()}",
+            f"-var=cdn_price_class={self.cdn_price_class}",
+            f"-var=enable_observability={str(self.observability).lower()}",
+            f"-var=log_retention_days={self.log_retention_days}",
+            f"-var=alert_emails={emails}",
+        ]
+
+
+def load_config(environment: str, path: Path = CONFIG_FILE) -> Config:
+    """Read slipway.yaml and flatten it for one environment."""
+    if not path.exists():
+        raise DeployError(f"{path} does not exist. Every Slipway app needs one.")
+
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as exc:
+        raise DeployError(f"{path} is not valid YAML:\n{exc}") from exc
+
+    environments = raw.get("environments") or {}
+    if environment not in environments:
+        known = ", ".join(sorted(environments)) or "none"
+        raise DeployError(f"Unknown environment {environment!r}. {path.name} defines: {known}")
+
+    env = environments[environment] or {}
+    image = raw.get("image") or {}
+    compute = raw.get("compute") or {}
+    # An environment may override any compute setting for itself alone.
+    compute_override = env.get("compute") or {}
+    apprunner = {**(compute.get("apprunner") or {}), **(compute_override.get("apprunner") or {})}
+
+    def pick(key: str, default: object) -> object:
+        return compute_override.get(key, compute.get(key, default))
+
+    config = Config(
+        name=raw.get("name") or "app",
+        region=raw.get("region") or "us-east-1",
+        environment=environment,
+        repository=image.get("repository") or f"{raw.get('name', 'app')}-app",
+        dockerfile=REPO_ROOT / (image.get("dockerfile") or "docker/Dockerfile.fastapi"),
+        context=REPO_ROOT / (image.get("context") or "template"),
+        static_dir=REPO_ROOT / (image.get("static_dir") or "template/app/static"),
+        compute_target=str(pick("target", "lambda")),
+        memory=int(pick("memory", 1024)),  # type: ignore[arg-type]
+        timeout=int(pick("timeout", 30)),  # type: ignore[arg-type]
+        apprunner_cpu=str(apprunner.get("cpu", "0.25 vCPU")),
+        apprunner_memory=str(apprunner.get("memory", "0.5 GB")),
+        cdn=bool(env.get("cdn", False)),
+        cdn_price_class=str(
+            env.get("cdn_price_class", raw.get("cdn_price_class", "PriceClass_100"))
+        ),
+        observability=bool(env.get("observability", True)),
+        log_retention_days=int(env.get("log_retention_days", 14)),
+        alert_emails=list(env.get("alert_emails") or []),
+    )
+
+    if config.compute_target not in {"lambda", "apprunner"}:
+        raise DeployError(
+            f"compute.target must be lambda or apprunner, not {config.compute_target!r}"
+        )
+    if not config.dockerfile.exists():
+        raise DeployError(f"Dockerfile not found: {config.dockerfile}")
+    if not config.context.is_dir():
+        raise DeployError(f"Build context is not a directory: {config.context}")
+
+    return config
 
 
 def step(message: str) -> None:
@@ -81,25 +197,6 @@ class Timer:
     def __exit__(self, *_: object) -> None:
         self.elapsed = time.monotonic() - self.started
         detail(f"{self.label} took {self.elapsed:.1f}s")
-
-
-def require_environment(name: str) -> str:
-    if name not in ENVIRONMENTS:
-        raise DeployError(
-            f"Unknown environment {name!r}. Expected one of: {', '.join(ENVIRONMENTS)}"
-        )
-    return name
-
-
-def tfvars_file(environment: str) -> Path:
-    path = ENVS_DIR / f"{environment}.tfvars"
-    if not path.exists():
-        raise DeployError(
-            f"{path} does not exist.\n"
-            f"  cp {path.with_suffix('.tfvars.example')} {path}\n"
-            "  then edit it. *.tfvars is gitignored on purpose."
-        )
-    return path
 
 
 def backend_config(stack: Path) -> Path:

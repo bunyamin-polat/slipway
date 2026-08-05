@@ -1,7 +1,12 @@
 # `20_app`
 
-The deployable application: a container image on Lambda with a Function URL and response
-streaming. One configuration, one workspace per environment.
+The deployable application: a container image on Lambda or App Runner, optionally behind
+CloudFront. One configuration, one workspace per environment.
+
+**Its variables come from `slipway.yaml`.** There are no `*.tfvars` files: `deploy.py`
+reads that one file, resolves it for the environment, and passes the values as `-var`
+flags. An application configures itself in one place, and there is no second place for a
+value to be wrong.
 
 Applied by `scripts/deploy.py`, not by hand. The commands below are what that script runs,
 written out for when you need to debug it.
@@ -13,25 +18,18 @@ cd terraform/stacks/20_app
 cp backend.hcl.example backend.hcl        # bucket name from 00_bootstrap's output
 terraform init -backend-config=backend.hcl
 terraform workspace new dev               # or: terraform workspace select dev
-
-cp ../../envs/dev.tfvars.example ../../envs/dev.tfvars
 ```
 
 ## Deploying
 
 ```bash
 uv run python scripts/deploy.py dev
+uv run python scripts/deploy.py dev --plan   # show what would change, do nothing
 ```
 
 Which is: build the image for `linux/amd64` without attestations → push it to ECR tagged
-with the git SHA → `terraform apply` with that tag → print the URL.
-
-By hand, the same thing:
-
-```bash
-terraform workspace select dev
-terraform apply -var-file=../../envs/dev.tfvars -var="image_tag=$(git rev-parse --short HEAD)"
-```
+with the git SHA → `terraform apply` with the variables from `slipway.yaml` → sync static
+files and invalidate the CDN if there is one → print the URL.
 
 ## Destroying
 
@@ -57,7 +55,7 @@ and prod cannot collide.
 The image tag is a git SHA, so rolling back is applying an older one:
 
 ```bash
-terraform apply -var-file=../../envs/dev.tfvars -var="image_tag=<older-sha>"
+uv run python scripts/deploy.py dev --tag <older-sha>
 ```
 
 No rebuild — the image is still in ECR, subject to the lifecycle policy that keeps the

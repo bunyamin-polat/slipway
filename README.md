@@ -51,10 +51,6 @@ slipway/
 │   │   ├── 00_bootstrap/         # Budget alarm, remote state bucket, ECR repository
 │   │   ├── 10_network/           # Only if you need a VPC — most apps do not
 │   │   └── 20_app/               # Composes the modules into a deployable app
-│   ├── envs/
-│   │   ├── dev.tfvars
-│   │   ├── test.tfvars
-│   │   └── prod.tfvars
 │   └── README.md                 # Which stack does what, and in which order
 ├── docker/
 │   ├── Dockerfile.fastapi        # Python-only backend
@@ -71,14 +67,15 @@ slipway/
 │   ├── plan.yml                  # terraform plan, posted as a PR comment
 │   ├── deploy-dev.yml            # Auto-deploy on merge to main
 │   └── promote.yml               # Manual approval → test → prod
-├── template/                     # Cookiecutter project skeleton
+├── slipway.yaml                  # The one file an app fills in — name, compute target,
+│                                 # per-environment settings. Generates Terraform's
+│                                 # variables, so there are no *.tfvars at all.
+├── template/                     # Skeleton an adopting project copies
 │   ├── app/                      # Minimal FastAPI + static frontend that deploys as-is
-│   ├── Dockerfile
-│   └── slipway.yaml              # Per-app config: name, compute target, env vars, secrets
+│   └── slipway.yaml              # Annotated starting point for that file
 ├── docs/
-│   ├── first-deploy.md           # Zero to a live URL
+│   ├── adopting.md               # What a second repository copies, and what bites it
 │   ├── cost.md                   # What each resource costs, and how to keep it near zero
-│   ├── secrets.md
 │   └── rollback.md
 ├── tests/
 │   ├── test_terraform_fmt.py     # fmt, validate, tflint across all modules

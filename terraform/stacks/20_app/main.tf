@@ -1,8 +1,9 @@
 # 20_app — the deployable application, one workspace per environment.
 #
 # `terraform workspace select dev` and `... prod` keep two isolated state files under one
-# configuration. Everything that differs between them arrives through envs/<name>.tfvars;
-# nothing in this file knows which environment it is beyond terraform.workspace.
+# configuration. Everything that differs between them arrives as variables generated from
+# `slipway.yaml` by the deploy scripts; nothing in this file knows which environment it is
+# beyond terraform.workspace.
 
 locals {
   environment = terraform.workspace

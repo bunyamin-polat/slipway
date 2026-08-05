@@ -23,12 +23,11 @@ from _common import (
     backend_config,
     detail,
     fail,
-    require_environment,
+    load_config,
     select_workspace,
     step,
     terraform,
     terraform_outputs,
-    tfvars_file,
     timed,
 )
 
@@ -94,15 +93,15 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        environment = require_environment(args.environment)
-        var_file = tfvars_file(environment)
+        config = load_config(args.environment)
+        environment = config.environment
         backend = backend_config(APP_STACK)
 
         step("Checking AWS credentials")
         account_id, region = aws_identity()
         detail(f"account {account_id} · region {region} · environment {environment}")
 
-        name = f"slipway-{environment}-app"
+        name = f"{config.resource_prefix}-app"
 
         # Read the state before destroying it, so the confirmation can say what is
         # actually there and the verification afterwards knows what to look for.
@@ -120,13 +119,10 @@ def main() -> int:
         step("Destroying")
 
         with timed("terraform destroy"):
+            # image_tag is irrelevant to a destroy, but Terraform still evaluates the
+            # configuration, so it needs a value.
             terraform(
-                [
-                    "destroy",
-                    "-input=false",
-                    "-auto-approve",
-                    f"-var-file={var_file}",
-                ],
+                ["destroy", "-input=false", "-auto-approve", *config.terraform_vars("latest")],
                 APP_STACK,
             )
 

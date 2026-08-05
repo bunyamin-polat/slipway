@@ -30,7 +30,7 @@ from _common import (
     DeployError,
     backend_config,
     fail,
-    require_environment,
+    load_config,
     select_workspace,
     step,
     terraform,
@@ -155,7 +155,9 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        environment = require_environment(args.environment)
+        # Loaded even when --url is given, so an unknown environment name fails here
+        # rather than after three checks against the wrong thing.
+        environment = load_config(args.environment).environment
         url = args.url or resolve_url(environment)
     except DeployError as exc:
         return fail(exc)

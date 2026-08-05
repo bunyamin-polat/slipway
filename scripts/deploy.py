@@ -18,10 +18,8 @@ import sys
 
 from _common import (
     APP_STACK,
-    BUILD_CONTEXT,
-    DOCKERFILE,
     LAMBDA_PLATFORM,
-    STATIC_DIR,
+    Config,
     DeployError,
     aws_identity,
     backend_config,
@@ -30,20 +28,19 @@ from _common import (
     fail,
     git_tag,
     invalidate,
+    load_config,
     registry_url,
-    require_environment,
     run,
     select_workspace,
     step,
     sync_static,
     terraform,
     terraform_outputs,
-    tfvars_file,
     timed,
 )
 
 
-def build_and_push(image: str) -> None:
+def build_and_push(config: Config, image: str) -> None:
     run(
         [
             "docker",
@@ -60,11 +57,11 @@ def build_and_push(image: str) -> None:
             # rejects the image: "media type ... is not supported". These two flags are
             # the entire fix, and the error never hints at them.
             "-f",
-            str(DOCKERFILE),
+            str(config.dockerfile),
             "-t",
             image,
             "--push",
-            str(BUILD_CONTEXT),
+            str(config.context),
         ]
     )
 
@@ -81,20 +78,38 @@ def main() -> int:
         action="store_true",
         help="Skip terraform's confirmation prompt. For CI, not for prod at 11pm.",
     )
+    parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Show what would change and stop. Builds nothing, pushes nothing, changes "
+        "nothing. This is what the pull request workflow runs.",
+    )
     args = parser.parse_args()
 
     try:
-        environment = require_environment(args.environment)
-        var_file = tfvars_file(environment)
+        config = load_config(args.environment)
+        environment = config.environment
         backend = backend_config(APP_STACK)
 
         step("Checking AWS credentials")
         account_id, region = aws_identity()
         detail(f"account {account_id} · region {region} · environment {environment}")
+        if region != config.region:
+            detail(f"warning: slipway.yaml says {config.region}, your session says {region}")
 
         registry = registry_url(account_id, region)
         tag = args.tag or git_tag()
-        image = f"{registry}/slipway-app:{tag}"
+        image = f"{registry}/{config.repository}:{tag}"
+
+        if args.plan:
+            step(f"Planning {environment}")
+            terraform(["init", "-input=false", f"-backend-config={backend}"], APP_STACK)
+            select_workspace(environment, APP_STACK)
+            terraform(
+                ["plan", "-input=false", "-no-color", *config.terraform_vars(tag)],
+                APP_STACK,
+            )
+            return 0
 
         if args.tag:
             step(f"Skipping build, deploying existing tag {tag}")
@@ -104,18 +119,13 @@ def main() -> int:
                 detail("Working tree is dirty — this tag will not match any commit exactly.")
             ecr_login(region)
             with timed("build and push"):
-                build_and_push(image)
+                build_and_push(config, image)
 
         step("Applying Terraform")
         terraform(["init", "-input=false", f"-backend-config={backend}"], APP_STACK)
         select_workspace(environment, APP_STACK)
 
-        apply_cmd = [
-            "apply",
-            "-input=false",
-            f"-var-file={var_file}",
-            f"-var=image_tag={tag}",
-        ]
+        apply_cmd = ["apply", "-input=false", *config.terraform_vars(tag)]
         if args.auto_approve:
             apply_cmd.append("-auto-approve")
 
@@ -130,7 +140,7 @@ def main() -> int:
         # static files and there is nothing to sync.
         if bucket:
             step(f"Syncing static files to {bucket}")
-            count = sync_static(STATIC_DIR, str(bucket))
+            count = sync_static(config.static_dir, str(bucket))
             detail(f"{count} file(s)")
 
             if distribution_id:

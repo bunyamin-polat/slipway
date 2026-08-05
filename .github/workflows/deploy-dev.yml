@@ -51,7 +51,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: slipway-deploy-dev-${{ github.run_id }}
 
-      - name: Write the config that is deliberately not in git
+      - name: Write the backend config, which is deliberately not in git
         run: |
           cat > terraform/stacks/20_app/backend.hcl <<EOF
           bucket       = "${{ secrets.TF_STATE_BUCKET }}"
@@ -60,7 +60,6 @@ jobs:
           encrypt      = true
           use_lockfile = true
           EOF
-          cp terraform/envs/dev.tfvars.example terraform/envs/dev.tfvars
 
       - run: uv sync --locked
 

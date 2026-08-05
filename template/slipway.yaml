@@ -1,0 +1,57 @@
+# slipway.yaml — copy this to the root of your repository and fill it in.
+#
+# It is the only file you have to edit. The scripts read it and generate Terraform's
+# variables, so there are no *.tfvars to copy and no name written down in two places.
+#
+# Commit it. It holds nothing secret: real secrets belong in Secrets Manager or SSM, and
+# the account ID lives in backend.hcl, which is gitignored.
+
+# Prefixes every resource: my-app-dev-app, my-app-prod-app, and so on.
+name: my-app
+
+# Pick once and keep it. Bedrock model availability varies by region, and you do not want
+# the app in one region and the models in another.
+region: us-east-1
+
+image:
+  # The ECR repository created by 00_bootstrap. Must already exist.
+  repository: my-app
+  # Paths are relative to the repository root.
+  dockerfile: docker/Dockerfile.fastapi
+  context: app
+  # Only used by environments with a CDN: these files are uploaded to S3 and served from
+  # the edge instead of starting your container.
+  static_dir: app/static
+
+compute:
+  # lambda    — scales to zero, nothing to pay when idle, and a cold start of a few
+  #             seconds for a container image. Right for spiky or occasional traffic.
+  # apprunner — always warm, no cold start, and a bill that never reaches zero. Right for
+  #             anything interactive, and for anything that streams for a long time:
+  #             Lambda bills wall-clock, so a 30-second answer costs 30 seconds.
+  target: lambda
+
+  memory: 1024 # Lambda MB. CPU scales with it, so this is really a speed dial.
+  timeout: 30 # seconds; also the ceiling on one streamed response
+
+  apprunner:
+    cpu: "0.25 vCPU"
+    memory: "0.5 GB"
+
+# Each environment is a Terraform workspace with its own state. Anything set here
+# overrides the values above, for that environment only.
+environments:
+  dev:
+    cdn: false # keeps teardown at seconds instead of ~15 minutes
+    observability: true
+    log_retention_days: 7
+    alert_emails: []
+
+  prod:
+    cdn: true
+    # PriceClass_100 is North America and Europe only, and the cheapest.
+    cdn_price_class: PriceClass_100
+    observability: true
+    log_retention_days: 30
+    # Alarms that reach nobody are decoration. SNS emails need confirming from the inbox.
+    alert_emails: ["you@example.com"]

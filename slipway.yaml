@@ -1,0 +1,60 @@
+# Slipway — the one file an application fills in.
+#
+# Everything the deploy needs, in one place: what the app is called, where it runs, how
+# it is built, and how each environment differs. `deploy.py`, `destroy.py` and `smoke.py`
+# read this and hand Terraform its variables, so there are no *.tfvars to copy and no
+# second place for a value to be wrong.
+#
+# It holds no secrets and is committed on purpose. Secrets belong in Secrets Manager or
+# SSM; account IDs stay in backend.hcl, which is not committed.
+
+name: slipway
+region: us-east-1
+
+image:
+  # ECR repository created once by 00_bootstrap.
+  repository: slipway-app
+  dockerfile: docker/Dockerfile.fastapi
+  context: template
+  # Uploaded to S3 and served from the edge when an environment has a CDN.
+  static_dir: template/app/static
+
+compute:
+  # lambda    — scales to zero, $0 idle, 2–3.5 s cold start
+  # apprunner — always warm, no cold start, bills for provisioned memory continuously
+  target: lambda
+
+  # Lambda: memory in MB, and CPU scales with it, so this is really a speed dial.
+  memory: 1024
+  timeout: 30
+
+  apprunner:
+    cpu: "0.25 vCPU"
+    memory: "0.5 GB"
+
+# Anything set here overrides the values above for that environment only.
+environments:
+  dev:
+    cdn: false # 22-second teardowns instead of 15-minute ones
+    observability: true
+    log_retention_days: 7
+    alert_emails: []
+
+  test:
+    # Exists to run the other compute target, so the two can be measured rather than
+    # argued about. Bring it up, take the numbers, destroy it — it bills while it lives.
+    compute:
+      target: apprunner
+    cdn: false
+    observability: false # App Runner's metrics are a different namespace
+    log_retention_days: 7
+
+  prod:
+    cdn: true
+    # PriceClass_100 is North America and Europe only, and the cheapest. PriceClass_All
+    # adds Asia, South America and Oceania at a higher per-request rate.
+    cdn_price_class: PriceClass_100
+    observability: true
+    log_retention_days: 30
+    # Alarms that reach nobody are decoration. SNS emails need confirming from the inbox.
+    alert_emails: []
