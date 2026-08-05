@@ -151,14 +151,18 @@ resource "aws_cloudwatch_dashboard" "this" {
             title  = "Cold starts (Init Duration, ms)"
             region = var.region
             view   = "table"
-            query  = <<-QUERY
+            # `bin(1h)` cannot be referenced from a `sort` clause — Logs Insights rejects
+            # the whole query with "unexpected symbol found (", and a dashboard widget
+            # shows that as a red box you only notice by looking. Aliasing the bin and
+            # sorting the alias is what makes it legal.
+            query = <<-QUERY
               SOURCE '${var.log_group_name}'
               | filter @type = "REPORT" and ispresent(@initDuration)
               | stats count() as coldStarts,
                       avg(@initDuration) as avgInitMs,
                       max(@initDuration) as maxInitMs
-                by bin(1h)
-              | sort by bin(1h) desc
+                by bin(1h) as hour
+              | sort hour desc
               | limit 24
             QUERY
           }
