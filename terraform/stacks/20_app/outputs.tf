@@ -37,6 +37,16 @@ output "distribution_id" {
   value       = var.enable_cdn ? module.site[0].distribution_id : null
 }
 
+output "dashboard_url" {
+  description = "CloudWatch dashboard for this environment, or null when observability is off."
+  value       = var.enable_observability ? module.observability[0].dashboard_url : null
+}
+
+output "alarm_topic_arn" {
+  description = "SNS topic the alarms publish to, or null when observability is off."
+  value       = var.enable_observability ? module.observability[0].sns_topic_arn : null
+}
+
 output "function_name" {
   description = "Lambda function name."
   value       = module.app.function_name
