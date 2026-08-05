@@ -122,6 +122,9 @@ data "aws_iam_policy_document" "github_actions" {
       "ecr:DescribeRepositories",
       "ecr:GetDownloadUrlForLayer",
       "ecr:InitiateLayerUpload",
+      # Reading the repository reads its tags too — data.aws_ecr_repository fails
+      # without this, before a single byte is pushed.
+      "ecr:ListTagsForResource",
       "ecr:PutImage",
       "ecr:UploadLayerPart",
     ]
@@ -140,9 +143,12 @@ data "aws_iam_policy_document" "github_actions" {
       "lambda:DeleteFunction",
       "lambda:DeleteFunctionUrlConfig",
       "lambda:GetFunction",
+      "lambda:GetFunctionCodeSigningConfig",
       "lambda:GetFunctionConfiguration",
       "lambda:GetFunctionUrlConfig",
       "lambda:GetPolicy",
+      # Reading a function reads its tags, the same trap as the ECR repository above.
+      "lambda:ListTags",
       "lambda:ListVersionsByFunction",
       "lambda:RemovePermission",
       "lambda:TagResource",
@@ -155,14 +161,24 @@ data "aws_iam_policy_document" "github_actions" {
     resources = ["arn:aws:lambda:*:${data.aws_caller_identity.current.account_id}:function:${var.project}-*"]
   }
 
+  # DescribeLogGroups is a list operation: it asks the account, not a group, so AWS
+  # evaluates it against an empty resource (`log-group::log-stream:` in the denial
+  # message) and a prefix-scoped ARN never matches. It has to be granted broadly. It is
+  # read-only, and every call that *changes* a log group stays scoped below.
   statement {
-    sid    = "Logs"
+    sid       = "LogsDiscovery"
+    effect    = "Allow"
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["arn:aws:logs:*:${data.aws_caller_identity.current.account_id}:log-group:*"]
+  }
+
+  statement {
+    sid    = "LogsManage"
     effect = "Allow"
 
     actions = [
       "logs:CreateLogGroup",
       "logs:DeleteLogGroup",
-      "logs:DescribeLogGroups",
       "logs:ListTagsForResource",
       "logs:PutRetentionPolicy",
       "logs:TagResource",
