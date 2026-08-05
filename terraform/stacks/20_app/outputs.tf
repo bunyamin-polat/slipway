@@ -3,9 +3,33 @@ output "environment" {
   value       = local.environment
 }
 
+output "url" {
+  description = <<-EOT
+    The live URL — the whole point of the repository. CloudFront's domain when the CDN is
+    enabled, the Function URL directly when it is not. Scripts and smoke tests read this
+    one, so they do not care which shape the environment has.
+  EOT
+  value       = var.enable_cdn ? module.site[0].url : module.app.function_url
+}
+
 output "function_url" {
-  description = "The live URL. This is the whole point of the repository."
+  description = "The Function URL itself, still reachable directly even behind CloudFront."
   value       = module.app.function_url
+}
+
+output "cdn_enabled" {
+  description = "Whether this environment has CloudFront in front of it."
+  value       = var.enable_cdn
+}
+
+output "static_bucket" {
+  description = "Bucket the deploy script syncs static files into, or null without a CDN."
+  value       = var.enable_cdn ? module.site[0].bucket_name : null
+}
+
+output "distribution_id" {
+  description = "Distribution to invalidate after a deploy, or null without a CDN."
+  value       = var.enable_cdn ? module.site[0].distribution_id : null
 }
 
 output "function_name" {

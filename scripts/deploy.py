@@ -21,6 +21,7 @@ from _common import (
     BUILD_CONTEXT,
     DOCKERFILE,
     LAMBDA_PLATFORM,
+    STATIC_DIR,
     DeployError,
     aws_identity,
     backend_config,
@@ -28,13 +29,15 @@ from _common import (
     ecr_login,
     fail,
     git_tag,
+    invalidate,
     registry_url,
     require_environment,
     run,
     select_workspace,
     step,
+    sync_static,
     terraform,
-    terraform_output,
+    terraform_outputs,
     tfvars_file,
     timed,
 )
@@ -119,13 +122,26 @@ def main() -> int:
         with timed("terraform apply"):
             terraform(apply_cmd, APP_STACK)
 
-        url = terraform_output("function_url", APP_STACK)
+        outputs = terraform_outputs(APP_STACK)
+        bucket = outputs.get("static_bucket")
+        distribution_id = outputs.get("distribution_id")
+
+        # Only when this environment has a CDN. Without one the container serves its own
+        # static files and there is nothing to sync.
+        if bucket:
+            step(f"Syncing static files to {bucket}")
+            count = sync_static(STATIC_DIR, str(bucket))
+            detail(f"{count} file(s)")
+
+            if distribution_id:
+                invalidation = invalidate(str(distribution_id))
+                detail(f"invalidation {invalidation} filed, not waited on")
 
         step("Deployed")
-        detail(f"url    {url}")
+        detail(f"url    {outputs.get('url')}")
         detail(f"image  {image}")
         detail(f"verify uv run python scripts/smoke.py {environment}")
-        detail(f"logs   aws logs tail {terraform_output('log_group_name', APP_STACK)} --follow")
+        detail(f"logs   aws logs tail {outputs.get('log_group_name')} --follow")
         detail(f"remove uv run python scripts/destroy.py {environment}")
 
     except DeployError as exc:

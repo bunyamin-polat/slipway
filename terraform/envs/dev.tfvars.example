@@ -13,3 +13,8 @@ ecr_repository_name = "slipway-app"
 memory_size        = 1024
 timeout            = 30
 log_retention_days = 7
+
+# Off for the fast loop: 22-second teardowns instead of 15-minute ones. An idle
+# distribution is free, so this is about time, not money. Flip it to true when the CDN
+# path is what you are testing.
+enable_cdn = false

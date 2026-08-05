@@ -14,3 +14,8 @@ timeout     = 30
 
 # Longer than dev: when something breaks in prod you want the logs to still be there.
 log_retention_days = 30
+
+# Always on in prod: static files from the edge, one hostname for page and API, and no
+# Lambda invocation for a file that never changes.
+enable_cdn      = true
+cdn_price_class = "PriceClass_100"

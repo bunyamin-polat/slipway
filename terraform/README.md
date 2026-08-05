@@ -26,7 +26,7 @@ committed.
 | --- | --- | --- |
 | `budget` | ✅ built | Monthly cost budget with email alerts. Apply before anything else. |
 | `lambda_container` | ✅ built | ECR image → Lambda with the Web Adapter and response streaming, Function URL, scoped IAM, log group with retention |
-| `static_site` | planned | S3 + CloudFront + OAC, invalidation on deploy |
+| `static_site` | ✅ built | Private S3 + CloudFront + OAC, optional second origin for the API, invalidation on deploy |
 | `data_bucket` | planned | Application storage, lifecycle rules, encryption |
 | `secrets` | planned | Secrets Manager / SSM parameters plus the IAM policy to read them |
 | `http_api` | planned | API Gateway HTTP API, routes, throttling, CORS |

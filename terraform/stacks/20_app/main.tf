@@ -42,5 +42,17 @@ module "app" {
   create_function_url = true
   invoke_mode         = "RESPONSE_STREAM"
 
-  # No CORS block: FastAPI serves both the page and the API, so there is only one origin.
+  # No CORS block: one origin serves both the page and the API, whether that origin is
+  # the Function URL directly or CloudFront in front of it.
+}
+
+module "site" {
+  count  = var.enable_cdn ? 1 : 0
+  source = "../../modules/static_site"
+
+  name        = local.name_prefix
+  price_class = var.cdn_price_class
+
+  # CloudFront wants a bare host: no scheme, no trailing slash.
+  api_origin_domain = replace(replace(module.app.function_url, "https://", ""), "/", "")
 }

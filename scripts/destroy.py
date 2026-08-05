@@ -27,23 +27,27 @@ from _common import (
     select_workspace,
     step,
     terraform,
+    terraform_outputs,
     tfvars_file,
     timed,
 )
 
 
-def confirm(environment: str, function_name: str) -> bool:
+def confirm(environment: str, function_name: str, has_cdn: bool) -> bool:
     """Make the user type the environment name. A y/n prompt is muscle memory; this is not."""
     print(f"\n\033[1mAbout to destroy the {environment} environment.\033[0m")
     print(f"  Lambda function : {function_name}")
     print("  Its log group, IAM role and Function URL go with it.")
+    if has_cdn:
+        print("  CloudFront and the static bucket go too — expect this to take ~15 minutes,")
+        print("  because a distribution must be disabled and propagated before it can be deleted.")
     print("  The ECR images and the state bucket are NOT touched.\n")
 
     answer = input(f"Type {environment!r} to confirm: ").strip()
     return answer == environment
 
 
-def survivors(function_name: str, region: str) -> list[str]:
+def survivors(function_name: str, region: str, bucket: str | None) -> list[str]:
     """Ask AWS what is left, instead of believing the exit code."""
     remaining: list[str] = []
 
@@ -57,6 +61,14 @@ def survivors(function_name: str, region: str) -> list[str]:
     logs = boto3.client("logs", region_name=region)
     groups = logs.describe_log_groups(logGroupNamePrefix=f"/aws/lambda/{function_name}")
     remaining += [f"log group {g['logGroupName']}" for g in groups.get("logGroups", [])]
+
+    if bucket:
+        s3 = boto3.client("s3")
+        try:
+            s3.head_bucket(Bucket=bucket)
+            remaining.append(f"s3 bucket {bucket}")
+        except s3.exceptions.ClientError:
+            pass
 
     return remaining
 
@@ -82,13 +94,19 @@ def main() -> int:
 
         function_name = f"slipway-{environment}-app"
 
-        if not args.yes and not confirm(environment, function_name):
+        # Read the state before destroying it, so the confirmation can say what is
+        # actually there and the verification afterwards knows what to look for.
+        terraform(["init", "-input=false", f"-backend-config={backend}"], APP_STACK)
+        select_workspace(environment, APP_STACK)
+        outputs = terraform_outputs(APP_STACK)
+        bucket = outputs.get("static_bucket")
+        has_cdn = bool(outputs.get("cdn_enabled"))
+
+        if not args.yes and not confirm(environment, function_name, has_cdn):
             print("Not confirmed. Nothing was destroyed.")
             return 1
 
         step("Destroying")
-        terraform(["init", "-input=false", f"-backend-config={backend}"], APP_STACK)
-        select_workspace(environment, APP_STACK)
 
         with timed("terraform destroy"):
             terraform(
@@ -102,7 +120,7 @@ def main() -> int:
             )
 
         step("Verifying against AWS")
-        left = survivors(function_name, region)
+        left = survivors(function_name, region, str(bucket) if bucket else None)
         if left:
             print("\n\033[31mStill present:\033[0m", file=sys.stderr)
             for item in left:
