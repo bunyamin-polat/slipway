@@ -26,7 +26,7 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -55,7 +55,6 @@ jobs:
           cp terraform/envs/dev.tfvars.example terraform/envs/dev.tfvars
 
       - name: Plan
-        id: plan
         working-directory: terraform/stacks/20_app
         run: |
           terraform init -input=false -backend-config=backend.hcl
@@ -64,7 +63,6 @@ jobs:
             -var-file=../../envs/dev.tfvars \
             -var="image_tag=${GITHUB_SHA::7}" \
             > plan.txt
-          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
 
       - name: Comment on the pull request
         uses: actions/github-script@v7
