@@ -65,3 +65,24 @@ variable "cdn_price_class" {
   type        = string
   default     = "PriceClass_100"
 }
+
+variable "enable_observability" {
+  description = <<-EOT
+    Alarms and a dashboard. On by default: three alarms sit inside the free tier's ten,
+    and the first three dashboards per account are free, so this costs nothing until the
+    portfolio has several environments running at once.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "alert_emails" {
+  description = <<-EOT
+    Who hears the alarms. Empty means they still fire and still show in the console but
+    reach nobody — acceptable in dev, wrong in prod.
+
+    SNS email subscriptions must be confirmed from the inbox before they deliver.
+  EOT
+  type        = list(string)
+  default     = []
+}

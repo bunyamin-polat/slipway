@@ -256,6 +256,60 @@ data "aws_iam_policy_document" "github_actions" {
     resources = ["*"]
   }
 
+  # Alarms and the dashboard. Alarm ARNs are scoped by name; dashboards and the
+  # Describe/List calls are not resource-scopable.
+  statement {
+    sid    = "CloudWatchAlarms"
+    effect = "Allow"
+
+    actions = [
+      "cloudwatch:DeleteAlarms",
+      "cloudwatch:ListTagsForResource",
+      "cloudwatch:PutMetricAlarm",
+      "cloudwatch:TagResource",
+      "cloudwatch:UntagResource",
+    ]
+
+    resources = ["arn:aws:cloudwatch:*:${data.aws_caller_identity.current.account_id}:alarm:${var.project}-*"]
+  }
+
+  statement {
+    sid    = "CloudWatchDashboardsAndReads"
+    effect = "Allow"
+
+    actions = [
+      "cloudwatch:DeleteDashboards",
+      "cloudwatch:DescribeAlarms",
+      "cloudwatch:GetDashboard",
+      "cloudwatch:ListDashboards",
+      "cloudwatch:PutDashboard",
+    ]
+
+    resources = ["*"]
+  }
+
+  # The alarm topic. Same lesson as ECR and Lambda: reading it reads its tags, and its
+  # attributes and subscriptions are separate calls again.
+  statement {
+    sid    = "SnsAlertTopic"
+    effect = "Allow"
+
+    actions = [
+      "sns:CreateTopic",
+      "sns:DeleteTopic",
+      "sns:GetTopicAttributes",
+      "sns:ListSubscriptionsByTopic",
+      "sns:ListTagsForResource",
+      "sns:SetTopicAttributes",
+      "sns:Subscribe",
+      "sns:TagResource",
+      "sns:UntagResource",
+      "sns:Unsubscribe",
+    ]
+
+    resources = ["arn:aws:sns:*:${data.aws_caller_identity.current.account_id}:${var.project}-*"]
+  }
+
   # Read-only calls Terraform makes on every plan.
   statement {
     sid    = "ReadOnlyLookups"

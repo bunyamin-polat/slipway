@@ -56,3 +56,16 @@ module "site" {
   # CloudFront wants a bare host: no scheme, no trailing slash.
   api_origin_domain = replace(replace(module.app.function_url, "https://", ""), "/", "")
 }
+
+module "observability" {
+  count  = var.enable_observability ? 1 : 0
+  source = "../../modules/observability"
+
+  name           = local.name_prefix
+  function_name  = module.app.function_name
+  log_group_name = module.app.log_group_name
+  region         = var.region
+  alert_emails   = var.alert_emails
+
+  cdn_distribution_id = var.enable_cdn ? module.site[0].distribution_id : null
+}

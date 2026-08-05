@@ -30,7 +30,7 @@ committed.
 | `data_bucket` | planned | Application storage, lifecycle rules, encryption |
 | `secrets` | planned | Secrets Manager / SSM parameters plus the IAM policy to read them |
 | `http_api` | planned | API Gateway HTTP API, routes, throttling, CORS |
-| `observability` | planned | Dashboards, alarms, log retention |
+| `observability` | ✅ built | Three alarms, one dashboard, cold starts charted from the logs, optional CloudFront panel |
 | `apprunner_service` | planned | Always-on alternative to `lambda_container` |
 
 ## Conventions

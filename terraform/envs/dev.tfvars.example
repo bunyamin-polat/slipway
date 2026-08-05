@@ -18,3 +18,10 @@ log_retention_days = 7
 # distribution is free, so this is about time, not money. Flip it to true when the CDN
 # path is what you are testing.
 enable_cdn = false
+
+# Alarms and a dashboard. Free at this size: three alarms fit inside the free tier's ten,
+# and the first three dashboards per account cost nothing.
+enable_observability = true
+
+# Leave empty in dev and the alarms still fire, they just reach nobody. Fill it in prod.
+alert_emails = []
