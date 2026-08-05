@@ -1,145 +1,240 @@
-# Slipway · AWS Deployment Blueprint
+# Slipway
 
-> **GitHub repo description:** Terraform + GitHub Actions blueprint for shipping containerised AI apps to AWS — Lambda with response streaming, S3, CloudFront, multi-environment workspaces, one-command deploy.
+[![CI](https://github.com/bunyamin-polat/slipway/actions/workflows/ci.yml/badge.svg)](https://github.com/bunyamin-polat/slipway/actions/workflows/ci.yml)
+[![Deploy dev](https://github.com/bunyamin-polat/slipway/actions/workflows/deploy-dev.yml/badge.svg)](https://github.com/bunyamin-polat/slipway/actions/workflows/deploy-dev.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> **A blueprint to copy from, not a service to depend on.** Every other repo in this portfolio says "Dockerfile" and stops. This is the one that puts a container on the internet, with infrastructure as code and a deploy pipeline. Build it first; every later project starts by copying the modules it needs out of here.
+**A deployment blueprint that puts a containerised FastAPI app on AWS — with response
+streaming, infrastructure as code, and a pipeline that redeploys on merge.**
 
-> **Standalone and self-contained.** This repo depends on nothing else, and **nothing depends on it at run time**. It ships its own minimal example app in `template/app/`, so `git clone && python scripts/deploy.py dev` produces a live URL for someone who has never seen the rest of the portfolio. Written from scratch, and useful to a stranger — that is what separates a blueprint from a deploy script that happens to live in a repo.
-
-## 1. What it is
-
-A reusable deployment blueprint: Terraform modules, deployment scripts and GitHub Actions workflows that take a containerised FastAPI + static-frontend application from a local repo to a running AWS environment — with separate dev, test and prod environments, secrets managed properly, and a rollback path.
-
-The AI content is deliberately near zero. That is the point. A portfolio full of LLM demos with no deployment story reads as a hobbyist; the same portfolio where every app has a live URL, a Terraform state and a green deploy badge reads as an engineer. This repo is what makes the difference, once, for all of them.
-
-## 2. Origin
-
-Written from scratch, informed by two patterns worth stating up front.
-
-**Modules versus stacks.** A single Terraform configuration with workspaces is exactly right at small scale. It stops being right once one state file holds a database, eight functions and a CDN distribution — at that size `apply` becomes frightening and people stop running it. The split here is: reusable modules with no state, composed by numbered stacks that each own their own state. Start with one `20_app` stack and split when it hurts.
-
-**Scripts, not raw Terraform.** `terraform apply` is never the whole story — there is also build, push to a registry, and CDN invalidation, and that sequence has to be one command or it will eventually be done wrong at 11pm. Hence `scripts/`, and hence `destroy.py` being a first-class citizen rather than an afterthought.
-
-## 3. Core capabilities
-
-- **Multi-stage container build** — frontend static export built in one stage, copied into a slim Python runtime in the next. One image, one artifact.
-- **Lambda with response streaming** — the Lambda Web Adapter lets a normal FastAPI app run unchanged on Lambda, and `response_stream` invoke mode keeps SSE working, which every streaming LLM UI needs.
-- **Two compute targets behind one interface** — Lambda (scale to zero, pay per request, cold starts) and App Runner / ECS Fargate (always warm, fixed cost). Pick per project, not per portfolio.
-- **Static frontend delivery** — S3 + CloudFront with cache invalidation on deploy.
-- **Terraform workspaces** — one configuration, isolated state for `dev`, `test`, `prod`, with per-environment `.tfvars`.
-- **Secrets handled properly** — AWS Secrets Manager / SSM Parameter Store, never `.tfvars` in git, never baked into the image.
-- **One-command deploy and destroy** — `./deploy.sh test`, `./destroy.sh test`. The destroy path matters more than the deploy path: it is what stops a forgotten environment quietly billing you.
-- **GitHub Actions pipeline** — build, test, push to ECR, `terraform plan` on PR, `terraform apply` on merge, with a manual approval gate for prod.
-- **Cost guardrails from minute one** — AWS Budgets with alerts before any resource exists.
-- **Cookiecutter-style project template** so a new app adopts the whole thing in one command.
-
-## 4. Proposed product structure
-
-```text
-slipway/
-├── terraform/
-│   ├── modules/
-│   │   ├── lambda_container/     # ECR image → Lambda + LWA + streaming, IAM, log group
-│   │   ├── apprunner_service/    # Always-on alternative to lambda_container
-│   │   ├── static_site/          # S3 bucket + CloudFront + OAC + invalidation
-│   │   ├── http_api/             # API Gateway HTTP API, routes, throttling, CORS
-│   │   ├── data_bucket/          # Application S3 storage, lifecycle rules, encryption
-│   │   ├── secrets/              # Secrets Manager / SSM parameters + IAM policy
-│   │   ├── observability/        # CloudWatch dashboards, alarms, log retention
-│   │   └── budget/               # AWS Budgets + SNS alerts — apply this first
-│   ├── stacks/
-│   │   ├── 00_bootstrap/         # Budget alarm, remote state bucket, ECR repository
-│   │   ├── 10_network/           # Only if you need a VPC — most apps do not
-│   │   └── 20_app/               # Composes the modules into a deployable app
-│   └── README.md                 # Which stack does what, and in which order
-├── docker/
-│   ├── Dockerfile.fastapi        # Python-only backend
-│   ├── Dockerfile.fullstack      # Multi-stage: Next.js export → Python runtime + LWA
-│   └── .dockerignore
-├── scripts/
-│   ├── deploy.py                 # Build → push to ECR → terraform apply → invalidate CDN
-│   ├── destroy.py                # Tear down an environment completely, with confirmation
-│   ├── run_local.py              # Same container, locally, with the same env contract
-│   ├── bootstrap.py              # One-time: remote state, ECR repo, OIDC role, budget
-│   └── smoke.py                  # Post-deploy health checks; non-zero exit fails the pipeline
-├── .github/workflows/
-│   ├── ci.yml                    # Lint, test, build image on every PR
-│   ├── plan.yml                  # terraform plan, posted as a PR comment
-│   ├── deploy-dev.yml            # Auto-deploy on merge to main
-│   └── promote.yml               # Manual approval → test → prod
-├── slipway.yaml                  # The one file an app fills in — name, compute target,
-│                                 # per-environment settings. Generates Terraform's
-│                                 # variables, so there are no *.tfvars at all.
-├── template/                     # Skeleton an adopting project copies
-│   ├── app/                      # Minimal FastAPI + static frontend that deploys as-is
-│   └── slipway.yaml              # Annotated starting point for that file
-├── docs/
-│   ├── adopting.md               # What a second repository copies, and what bites it
-│   ├── cost.md                   # What each resource costs, and how to keep it near zero
-│   └── rollback.md
-├── tests/
-│   ├── test_terraform_fmt.py     # fmt, validate, tflint across all modules
-│   └── test_scripts.py
-├── .env.example
-└── README.md
+```bash
+git clone https://github.com/bunyamin-polat/slipway.git && cd slipway
+uv sync
+uv run python scripts/deploy.py dev     # → a live URL
+uv run python scripts/destroy.py dev    # → nothing left
 ```
 
-**No UI.** This is a CLI and a set of workflows. The "interface" is `python scripts/deploy.py test` and a green check on a pull request. Resist the urge to build a dashboard for it — the GitHub Actions run page and the CloudWatch dashboard already exist.
-
-**Why this shape:** `terraform/modules/` versus `terraform/stacks/` is the important split. Modules are reusable pieces with no state; stacks are the things you actually apply, each with its own state file. A single monolithic configuration with workspaces is exactly right at small scale; splitting into numbered stacks becomes necessary once one state file holds a database, eight functions and a CDN distribution, because at that size `apply` becomes frightening and people stop running it. Start with one `20_app` stack and split when it hurts. `scripts/` exists because raw `terraform apply` is never the whole story — you also have to build, push, and invalidate the CDN, and that sequence must be one command or it will be done wrong at 11pm.
-
-## 5. Models used
-
-None. This repo deploys applications that use models; it does not call any itself.
-
-The one model-adjacent decision it does encode: **which region**, because Bedrock model availability varies by region and you do not want your app in `eu-west-1` and your models in `us-west-2` unless you meant it.
-
-## 6. Libraries & services
-
-**IaC:** Terraform ≥ 1.11 (workspaces, remote state in S3 with native locking via `use_lockfile`, `tflint`, `terraform fmt`)
-**AWS:** Lambda (container images), [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), ECR, S3, CloudFront, API Gateway HTTP API, IAM, Secrets Manager / SSM Parameter Store, CloudWatch, AWS Budgets, EventBridge; App Runner or ECS Fargate as the always-on option
-**Containers:** Docker, multi-stage builds, `docker buildx` for `linux/amd64` from an ARM Mac — **this catches everyone once**
-**CI/CD:** GitHub Actions, OIDC federation to AWS (no long-lived access keys in secrets)
-**Scripting:** Python + `boto3`, `uv`
-**Local:** Docker Desktop, AWS CLI v2
-**Optional:** `checkov` or `tfsec` for IaC security scanning — cheap to add, good signal
-
-## 7. Productization notes
-
-- **Set the budget alarm before the first `terraform apply`.** A NAT Gateway you forgot about is roughly $32 a month, forever, for nothing.
-- **`destroy` is a first-class feature.** Write it, test it, and use it. Every environment you cannot confidently destroy is a subscription you did not intend to buy.
-- **Remote state from the start.** Local `terraform.tfstate` works until you deploy from CI, or from a second machine, or lose the file — after which recovery is manual and miserable. `00_bootstrap` exists for exactly this, and it is the one stack that starts with local state, because it is the thing that creates the bucket. Move it with `terraform init -migrate-state` once the bucket exists.
-- **OIDC, not access keys.** GitHub Actions can assume an AWS role directly. Long-lived `AWS_SECRET_ACCESS_KEY` in repo secrets is the most common way portfolio projects leak credentials.
-- **Build for `linux/amd64` explicitly.** An image built on Apple Silicon fails on Lambda with an opaque error. `--platform linux/amd64` in the build script, not in a comment.
-- **Streaming needs the invoke mode set.** The Lambda Web Adapter defaults to buffered responses; SSE silently stops working. `AWS_LWA_INVOKE_MODE=response_stream` plus a Lambda Function URL — miss this and every streaming UI in your portfolio delivers its answer in one lump at the end.
-- **Lambda cold starts are real for container images.** A few hundred MB of Python plus model client libraries is seconds of cold start. Provisioned concurrency costs money; App Runner is often the better answer for anything user-facing and interactive. Encode the choice per app, and say why in each app's README.
-- **Adopters vendor, they do not reference.** Terraform can pull a module straight from a git URL. Do not document that as the way to use this repo. A remote `source = "git::https://github.com/…"` means every project's `apply` depends on this repo's `main` branch, and one bad commit here breaks six deployments at once. Copying costs a manual update when a module improves; referencing costs a shared failure mode. Take the copy.
-- **Never commit `.tfvars` with real values.** `*.tfvars` in `.gitignore`, `*.tfvars.example` committed.
-- **Tag every resource** with project and environment. It is the only way to read a bill and know which experiment is costing you.
-- **One environment is enough at first.** Three workspaces is the pattern; you personally may only ever run `dev` plus `prod`. Build the capability, use what you need.
-
-## 8. Build order
-
-1. **Bootstrap.** A budget alarm with an email alert first, then the remote state bucket and the ECR repository. `terraform apply` on nothing but plumbing. State locking is the S3 backend's own (`use_lockfile`), not a DynamoDB table — that mechanism was deprecated in Terraform 1.11 and the table is one more resource to pay for and forget about.
-2. **Write the example app, in this repo.** `template/app/` — a FastAPI service with one streaming endpoint and a static page, forty lines, no AI. Containerise it with `Dockerfile.fastapi` and run it through `run_local.py`. Its frontend is a single static page, so there is nothing for a Node build stage to do; `Dockerfile.fullstack` is for adopters whose frontend has a real build step, and it gets proven when one of them uses it rather than by a fake example here. Deliberately trivial: the payload must never be the interesting part, and the blueprint must be provable without any other repository existing.
-3. **Deploy it manually, once, by hand.** Push to ECR, create the Lambda in the console, wire a Function URL. You will never understand the Terraform until you have done this once with your own fingers.
-4. **Terraform the same thing.** `20_app` stack composing `lambda_container` + `data_bucket` + `secrets` + `budget`. Destroy the manual one first. `deploy.py` does build → push → apply.
-5. **Add the frontend path.** `static_site` module: S3 + CloudFront + OAC, invalidation on deploy.
-6. **Streaming and smoke tests.** Response-stream invoke mode, verify SSE end to end from the deployed URL, `smoke.py` as the gate.
-7. **Workspaces.** `dev` and `prod`, per-env tfvars, and a `destroy.py` you have actually run.
-8. **GitHub Actions.** OIDC role, CI on PR, `terraform plan` as a PR comment, auto-deploy to dev on merge, manual approval to prod.
-9. **Observability + the alternative compute target.** CloudWatch dashboard and alarms; `apprunner_service` module for apps that should stay warm.
-10. **Template it.** `template/` plus `slipway.yaml`, so adopting this in a new repo is one command. Then adopt it in a second project to prove the abstraction holds.
-
-## 9. Putting it on GitHub
-
-- **This is the repo that says "I can ship."** Most AI portfolios stop at a screenshot of localhost. Lead the README with the architecture diagram and the one-line deploy command.
-- **The hero artifact is a live URL plus its Terraform.** Link a deployed app, then link the exact stack that created it.
-- **Publish the cost breakdown.** "This runs at roughly $X/month at low traffic, and $0 when idle on Lambda" is concrete, useful, and shows you have looked at a bill.
-- **Show the PR flow**: `terraform plan` posted as a comment, then an approval gate before prod. One screenshot communicates the whole practice.
-- **Document the three things that bite everyone** — `linux/amd64`, response-stream invoke mode, and forgetting to destroy. A troubleshooting section built from real scars is the most-read part of any infra README.
-- **Make it genuinely reusable.** If someone can clone it, fill in `slipway.yaml`, and deploy their own FastAPI app, this stops being a personal script and starts being a tool. That is the difference between a repo people skim and one they star.
+Measured, not claimed: **42 seconds** from that command to a working URL, **22 seconds**
+to remove every trace, **1 minute 22 seconds** from a merge on `main` to the new version
+being live.
 
 ---
 
-**Related:** nothing, by design. This repo is built first and alone, and no other repository imports it, calls it, or references its Terraform remotely. Projects that use it — [Groundwork](https://github.com/bunyamin-polat/groundwork), [Assay](https://github.com/bunyamin-polat/assay), [Winnow](https://github.com/bunyamin-polat/winnow), [Triage](https://github.com/bunyamin-polat/triage), [Vitals](https://github.com/bunyamin-polat/vitals), [Chart](https://github.com/bunyamin-polat/chart) — do so by **copying** modules into their own `infra/` at setup time and owning them from then on.
+## Why this exists
+
+Most AI portfolios stop at a screenshot of localhost. The code is fine, the model calls
+work, and nothing has ever been deployed — because deployment is a separate skill and
+learning it once, properly, is a week nobody budgets for.
+
+This is that week, done once, in a form that every later project can copy. It contains
+**no AI at all**. That is the point: the payload is deliberately forty lines of FastAPI so
+the deployment is the interesting part.
+
+The gap it closes is specific. CI is easy and common; CD is neither. A repository with a
+green test badge says "my code compiles". A repository with a live URL, a Terraform state,
+a cost breakdown and a one-command teardown says something else.
+
+## How it works
+
+```mermaid
+flowchart LR
+    push["git push to main"] --> gha["GitHub Actions"]
+    gha -->|"OIDC, no stored keys"| role["IAM role"]
+    gha --> build["docker buildx<br/>linux/amd64"]
+    build --> ecr[("ECR<br/>tagged with commit SHA")]
+    role --> tf["terraform apply"]
+    ecr --> tf
+    tf --> fn["Lambda + Function URL<br/>response streaming"]
+    tf --> cdn["CloudFront + S3<br/>optional"]
+    tf --> smoke["smoke.py<br/>gates the pipeline"]
+    cdn --> user(("user"))
+    fn --> user
+```
+
+The application inside the container is an ordinary HTTP server. The
+[AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) baked into the
+image translates Lambda invocations into HTTP requests, so there is no Lambda-specific
+code anywhere in the app — and the identical image runs on App Runner, or locally under
+`docker run`, unchanged.
+
+## The one file you edit
+
+`slipway.yaml` is the whole configuration. It generates Terraform's variables, so a value
+exists in exactly one place — there are no `*.tfvars` to copy and keep in sync.
+
+```yaml
+name: my-app
+region: us-east-1
+
+image:
+  repository: my-app
+  dockerfile: docker/Dockerfile.fastapi
+  context: app
+
+compute:
+  target: lambda # or apprunner
+  memory: 1024
+  timeout: 30
+
+environments:
+  dev:
+    cdn: false
+    observability: true
+    log_retention_days: 7
+  prod:
+    cdn: true
+    log_retention_days: 30
+    alert_emails: ["you@example.com"]
+```
+
+Your application has to provide exactly two things: an HTTP server on `$PORT`, and a
+`/healthz` that returns 200. That is the entire contract.
+
+## What is in the box
+
+| Terraform module | What it gives you |
+| --- | --- |
+| `budget` | Account budget with email alerts. Applied **before** anything billable. |
+| `lambda_container` | Container on Lambda, Function URL, response streaming, log group with retention, IAM scoped to that one log group |
+| `apprunner_service` | The always-warm alternative, same image, autoscaling capped |
+| `static_site` | Private S3 + CloudFront + OAC, one hostname for page and API, streaming-safe cache behaviour |
+| `observability` | Three alarms and a dashboard, including cold starts charted from the logs |
+
+| Script | What it does |
+| --- | --- |
+| `deploy.py` | build → push → apply → sync static → invalidate → print the URL |
+| `destroy.py` | tear down, then **ask AWS** whether it really went |
+| `smoke.py` | health, page, and streaming — measured by arrival time, not status code |
+| `run_local.py` | the same image, locally, under the same environment contract |
+
+Stacks are numbered by the order they are applied: `00_bootstrap` once per account
+(budget, state bucket, ECR, the GitHub OIDC role), `20_app` once per environment as a
+Terraform workspace.
+
+## The pipeline
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `ci.yml` | every push and PR | ruff, pytest, tflint, image build — **no AWS credentials at all** |
+| `plan.yml` | pull request | posts `terraform plan` as a comment, updating it in place |
+| `deploy-dev.yml` | merge to `main` | deploys, then gates on the smoke test |
+| `promote.yml` | manual | promotes an **existing image tag** to prod behind an approval gate |
+
+`promote.yml` never rebuilds. The artifact tested in dev is the artifact that reaches
+prod, which is the reason images are tagged with a commit SHA — and why a rollback is
+`deploy.py prod --tag <older-sha>` rather than an archaeology project.
+
+There is no `AWS_SECRET_ACCESS_KEY` anywhere. GitHub Actions assumes a role over OIDC,
+pinned to this repository and to three triggers: the default branch, pull requests, and
+named environments.
+
+## Measured
+
+All numbers from `us-east-1`, observed from Türkiye, on the example app.
+
+| | |
+| --- | --- |
+| Merge on `main` → live | **1 m 22 s** |
+| `deploy.py dev` locally | 42 s (build + push + apply) |
+| `destroy.py dev` | 22 s — about 15 minutes when CloudFront is enabled |
+| Lambda cold start | **2.2 – 3.5 s** (1024 MB, 80.8 MB compressed image) |
+| Lambda warm | 356 ms observed, of which **2 ms** is Lambda; the rest is the round trip |
+| App Runner first request | 634 ms — no cold start, ever |
+| App Runner warm | 455 ms |
+
+**Lambda or App Runner?** The same image runs on both; `compute.target` picks.
+
+| | Lambda | App Runner |
+| --- | --- | --- |
+| Idle cost | $0 | provisioned memory, billed continuously |
+| Cold start | 2.2 – 3.5 s | none |
+| Billing | per invocation-millisecond, **including time spent waiting** | memory always, CPU while serving |
+| Streaming setup | three settings in three places | nothing to configure |
+
+That third row decides more than it looks. Lambda bills wall-clock, and a streaming
+endpoint holds its invocation open for the entire response: a request that streamed for
+1957 ms billed 1957 ms with the CPU essentially idle. An app that streams model output for
+thirty seconds pays for thirty seconds of Lambda. For anything interactive and slow, App
+Runner is often the cheaper answer as well as the faster one.
+
+**A CDN is a trade, not a free win.** Putting CloudFront in front made the static page
+twice as fast (498 ms → 223 ms) and made the first API call *slower* (442 ms → 4367 ms) —
+because static traffic no longer keeps the function warm.
+
+## Four things that will bite you
+
+Every one of these was hit while building this, and the fix is in the code.
+
+**1. `--platform linux/amd64`.** An image built on Apple Silicon dies on Lambda with
+`Runtime.InvalidEntrypoint`, which mentions nothing about architecture.
+
+**2. buildx attestations.** Docker 28 attaches provenance and SBOM metadata by default,
+turning the push into a manifest index with an `unknown/unknown` entry. Lambda answers
+*"The image manifest, config or layer media type … is not supported"*. Build with
+`--provenance=false --sbom=false`.
+
+**3. Streaming needs three settings aligned** — `AWS_LWA_INVOKE_MODE=response_stream` in
+the image, `invoke_mode = "RESPONSE_STREAM"` on the Function URL, and `compress = false`
+on the CloudFront behaviour. Miss any one and the response still arrives, still looks
+correct, and is delivered in one lump at the end. This is why `smoke.py` measures *when*
+events arrive rather than whether they did, and why there is a test that runs it against a
+deliberately buffering server.
+
+**4. Deleting things by hand leaves debris.** Removing a Lambda in the console leaves its
+log group (retention: never expire) and its IAM role behind, with no error and no warning.
+Terraform-managed environments take them along. This is the entire argument for
+`destroy.py`, and for it verifying against AWS instead of trusting an exit code.
+
+A fifth, for anyone wiring up OIDC: GitHub's subject claim now carries immutable numeric
+IDs — `repo:owner@78386903/repo@1323385694:environment:dev`. Neither GitHub's error nor
+AWS's mentions the subject. Read the real claim out of CloudTrail's
+`AssumeRoleWithWebIdentity` events rather than guessing.
+
+## Cost
+
+The design keeps idle spend at zero rather than small:
+
+- **Lambda + Function URL** — per request, nothing when idle
+- **S3 state** — kilobytes, with old versions expiring after 90 days
+- **ECR** — the only storage that grows; a lifecycle policy expires untagged images after
+  7 days and keeps the last 10
+- **Alarms and dashboard** — inside the free tier (10 alarms, 3 dashboards)
+- **CloudFront** — free while idle, per request otherwise
+- **App Runner** — the exception: roughly $3/month minimum, because it cannot scale to zero
+
+A **budget alarm is the first thing applied to an account**, before any billable resource
+exists, at 50 / 80 / 100 % of a monthly limit plus a forecast alert. Free-tier credits are
+excluded from it deliberately, so the alarm reports what the account genuinely costs
+rather than what is currently reaching your card.
+
+## Using it in your own project
+
+See **[docs/adopting.md](docs/adopting.md)**. Short version: copy the modules, scripts and
+workflows into your repository, edit `slipway.yaml`, run `deploy.py`.
+
+**Copy, do not reference.** Terraform can load a module straight from a git URL, and that
+would make every project's `apply` depend on this repository's `main` branch — one bad
+commit here breaking six deployments at once. Copying costs a manual update when a module
+improves. Take that trade.
+
+## What this does not do
+
+Being clear about the edges is part of the point:
+
+- **No VPC.** `10_network` is a placeholder. Most apps do not need one, and a NAT gateway
+  costs about $32 a month for as long as you forget about it.
+- **No custom domain or ACM certificate.** Function URLs and CloudFront domains only.
+- **No secrets module yet.** The example app reads none, and an unused Secrets Manager
+  entry is cost and cleanup debt in exchange for proving nothing.
+- **`Dockerfile.fullstack` is untested.** The example's frontend is a single static page,
+  so there is nothing for a Node build stage to do. It waits for a real frontend rather
+  than a fake one.
+- **Adoption is proven once, partially.** A clean clone with only `slipway.yaml` changed
+  deployed a differently-named app in 43 seconds, passed its smoke test beside the
+  original environment, and destroyed in 24 seconds. But it was the same repository
+  layout and the same example app. A project with its own code, secrets and domain will
+  find edges that test could not.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). It is a blueprint to copy from, not a service to depend on.

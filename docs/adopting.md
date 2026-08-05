@@ -115,6 +115,24 @@ straight through to production.
 
 No `AWS_SECRET_ACCESS_KEY`. Ever. That is the point of the OIDC role.
 
+## Your first deploy will be tagged `-dirty`
+
+Images are tagged with the git commit SHA, and `deploy.py` appends `-dirty` when the
+working tree has uncommitted changes — because in that state the image does not correspond
+to any commit. Editing `slipway.yaml` is an uncommitted change, so the very first deploy
+of a new adopter is always `<sha>-dirty`. Commit your config and the next one is clean.
+
+## Has this been tested?
+
+Yes, once, honestly: a clean clone of this repository into a temporary directory, with
+`slipway.yaml` changed to a different application name and a new environment. It deployed
+in 43 seconds, passed its smoke test, ran beside the original environment without
+touching it, and destroyed in 24 seconds leaving nothing behind.
+
+What that does not prove: it was the same repository layout, the same Dockerfile and the
+same example app. A project with its own code, its own secrets and its own domain will
+find edges this could not.
+
 ## Things that will bite you
 
 Each of these has already bitten this repository, and the fix is in the code:
