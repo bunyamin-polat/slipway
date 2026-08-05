@@ -11,6 +11,38 @@ resource "aws_iam_openid_connect_provider" "github" {
   thumbprint_list = var.github_oidc_thumbprints
 }
 
+locals {
+  github_owner = split("/", var.github_repository)[0]
+  github_repo  = split("/", var.github_repository)[1]
+
+  # GitHub issues subject claims in two shapes, and which one you get is not something
+  # the workflow controls:
+  #
+  #   repo:owner/repo:environment:dev
+  #   repo:owner@78386903/repo@1323385694:environment:dev
+  #
+  # The second carries immutable numeric IDs so a token keeps meaning the same repository
+  # after a rename. Almost no example policy shows it, and the failure it causes is a bare
+  # "Not authorized to perform sts:AssumeRoleWithWebIdentity" that names nothing.
+  #
+  # The `@*` wildcards stay safe: GitHub logins and repository names cannot contain "@",
+  # so nothing but this repository can match either pattern.
+  github_subject_prefixes = [
+    "repo:${var.github_repository}",
+    "repo:${local.github_owner}@*/${local.github_repo}@*",
+  ]
+
+  # The triggers allowed to assume the role: the default branch, pull requests, and named
+  # environments. A workflow on a fork's branch matches none of them.
+  github_subjects = flatten([
+    for prefix in local.github_subject_prefixes : [
+      "${prefix}:ref:refs/heads/main",
+      "${prefix}:pull_request",
+      "${prefix}:environment:*",
+    ]
+  ])
+}
+
 data "aws_iam_policy_document" "github_assume_role" {
   statement {
     effect  = "Allow"
@@ -28,17 +60,12 @@ data "aws_iam_policy_document" "github_assume_role" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # And this pins it to one repository, and to specific triggers within it: the default
-    # branch, pull requests, and named environments. A workflow on a fork's branch does
-    # not match, which is what stops a drive-by pull request from assuming the role.
+    # And this pins it to one repository and to specific triggers within it — see the
+    # locals above for why there are two spellings of the same repository.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:${var.github_repository}:ref:refs/heads/main",
-        "repo:${var.github_repository}:pull_request",
-        "repo:${var.github_repository}:environment:*",
-      ]
+      values   = local.github_subjects
     }
   }
 }
