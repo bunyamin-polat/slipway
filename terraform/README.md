@@ -31,7 +31,7 @@ committed.
 | `secrets` | planned | Secrets Manager / SSM parameters plus the IAM policy to read them |
 | `http_api` | planned | API Gateway HTTP API, routes, throttling, CORS |
 | `observability` | ✅ built | Three alarms, one dashboard, cold starts charted from the logs, optional CloudFront panel |
-| `apprunner_service` | planned | Always-on alternative to `lambda_container` |
+| `apprunner_service` | ✅ built | Always-warm alternative to `lambda_container`, same image, capped autoscaling |
 
 ## Conventions
 

@@ -28,10 +28,40 @@ variable "image_tag" {
   default     = "latest"
 }
 
+variable "compute_target" {
+  description = <<-EOT
+    Where the container runs: "lambda" or "apprunner". The same image either way.
+
+    lambda    — scales to zero, costs nothing idle, pays a 2.2–3.5 s cold start
+    apprunner — always warm, no cold start, bills for provisioned memory around the clock
+
+    Pick per project, not per portfolio.
+  EOT
+  type        = string
+  default     = "lambda"
+
+  validation {
+    condition     = contains(["lambda", "apprunner"], var.compute_target)
+    error_message = "compute_target must be lambda or apprunner."
+  }
+}
+
 variable "memory_size" {
   description = "Lambda memory in MB. CPU scales with it, so it is really a speed dial."
   type        = number
   default     = 1024
+}
+
+variable "apprunner_cpu" {
+  description = "App Runner vCPU per instance. Only used when compute_target is apprunner."
+  type        = string
+  default     = "0.25 vCPU"
+}
+
+variable "apprunner_memory" {
+  description = "App Runner memory per instance. Billed continuously."
+  type        = string
+  default     = "0.5 GB"
 }
 
 variable "timeout" {

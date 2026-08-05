@@ -33,11 +33,11 @@ from _common import (
 )
 
 
-def confirm(environment: str, function_name: str, has_cdn: bool) -> bool:
+def confirm(environment: str, name: str, target: str, has_cdn: bool) -> bool:
     """Make the user type the environment name. A y/n prompt is muscle memory; this is not."""
     print(f"\n\033[1mAbout to destroy the {environment} environment.\033[0m")
-    print(f"  Lambda function : {function_name}")
-    print("  Its log group, IAM role and Function URL go with it.")
+    print(f"  Compute ({target}) : {name}")
+    print("  Its log group, IAM role and URL go with it.")
     if has_cdn:
         print("  CloudFront and the static bucket go too — expect this to take ~15 minutes,")
         print("  because a distribution must be disabled and propagated before it can be deleted.")
@@ -47,19 +47,29 @@ def confirm(environment: str, function_name: str, has_cdn: bool) -> bool:
     return answer == environment
 
 
-def survivors(function_name: str, region: str, bucket: str | None) -> list[str]:
-    """Ask AWS what is left, instead of believing the exit code."""
+def survivors(name: str, region: str, bucket: str | None) -> list[str]:
+    """Ask AWS what is left, instead of believing the exit code.
+
+    Checks both compute targets by name rather than trusting the state we just deleted —
+    the point of this function is to distrust what Terraform said.
+    """
     remaining: list[str] = []
 
     lambda_client = boto3.client("lambda", region_name=region)
     try:
-        lambda_client.get_function(FunctionName=function_name)
-        remaining.append(f"lambda function {function_name}")
+        lambda_client.get_function(FunctionName=name)
+        remaining.append(f"lambda function {name}")
     except lambda_client.exceptions.ResourceNotFoundException:
         pass
 
+    apprunner = boto3.client("apprunner", region_name=region)
+    for service in apprunner.list_services().get("ServiceSummaryList", []):
+        # A deleted service lingers in the list as DELETED for a while; that is fine.
+        if service["ServiceName"] == name and service["Status"] != "DELETED":
+            remaining.append(f"app runner service {name} ({service['Status']})")
+
     logs = boto3.client("logs", region_name=region)
-    groups = logs.describe_log_groups(logGroupNamePrefix=f"/aws/lambda/{function_name}")
+    groups = logs.describe_log_groups(logGroupNamePrefix=f"/aws/lambda/{name}")
     remaining += [f"log group {g['logGroupName']}" for g in groups.get("logGroups", [])]
 
     if bucket:
@@ -92,7 +102,7 @@ def main() -> int:
         account_id, region = aws_identity()
         detail(f"account {account_id} · region {region} · environment {environment}")
 
-        function_name = f"slipway-{environment}-app"
+        name = f"slipway-{environment}-app"
 
         # Read the state before destroying it, so the confirmation can say what is
         # actually there and the verification afterwards knows what to look for.
@@ -101,8 +111,9 @@ def main() -> int:
         outputs = terraform_outputs(APP_STACK)
         bucket = outputs.get("static_bucket")
         has_cdn = bool(outputs.get("cdn_enabled"))
+        target = str(outputs.get("compute_target") or "lambda")
 
-        if not args.yes and not confirm(environment, function_name, has_cdn):
+        if not args.yes and not confirm(environment, name, target, has_cdn):
             print("Not confirmed. Nothing was destroyed.")
             return 1
 
@@ -120,7 +131,7 @@ def main() -> int:
             )
 
         step("Verifying against AWS")
-        left = survivors(function_name, region, str(bucket) if bucket else None)
+        left = survivors(name, region, str(bucket) if bucket else None)
         if left:
             print("\n\033[31mStill present:\033[0m", file=sys.stderr)
             for item in left:
@@ -131,7 +142,7 @@ def main() -> int:
             )
             return 1
 
-        detail("nothing left: no function, no log group")
+        detail("nothing left: no function, no service, no log group")
         detail("ECR images remain, subject to the lifecycle policy that keeps the last 10")
         detail("the budget alarm and the state bucket are account-level and stay")
 

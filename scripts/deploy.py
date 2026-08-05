@@ -139,9 +139,11 @@ def main() -> int:
 
         step("Deployed")
         detail(f"url    {outputs.get('url')}")
+        detail(f"on     {outputs.get('compute_target')}")
         detail(f"image  {image}")
         detail(f"verify uv run python scripts/smoke.py {environment}")
-        detail(f"logs   aws logs tail {outputs.get('log_group_name')} --follow")
+        if outputs.get("log_group_name"):
+            detail(f"logs   aws logs tail {outputs['log_group_name']} --follow")
         detail(f"remove uv run python scripts/destroy.py {environment}")
 
     except DeployError as exc:

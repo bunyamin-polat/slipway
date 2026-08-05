@@ -310,6 +310,37 @@ data "aws_iam_policy_document" "github_actions" {
     resources = ["arn:aws:sns:*:${data.aws_caller_identity.current.account_id}:${var.project}-*"]
   }
 
+  # App Runner, for environments that pick it as their compute target. Creation and the
+  # list calls carry no resource ARN, so they cannot be scoped.
+  statement {
+    sid    = "AppRunner"
+    effect = "Allow"
+
+    actions = [
+      "apprunner:CreateAutoScalingConfiguration",
+      "apprunner:CreateService",
+      "apprunner:DeleteAutoScalingConfiguration",
+      "apprunner:DeleteService",
+      "apprunner:DescribeAutoScalingConfiguration",
+      "apprunner:DescribeService",
+      "apprunner:ListServices",
+      "apprunner:ListTagsForResource",
+      "apprunner:TagResource",
+      "apprunner:UntagResource",
+      "apprunner:UpdateService",
+    ]
+
+    resources = ["*"]
+  }
+
+  # App Runner needs its own service-linked role the first time it runs in an account.
+  statement {
+    sid       = "AppRunnerServiceLinkedRole"
+    effect    = "Allow"
+    actions   = ["iam:CreateServiceLinkedRole"]
+    resources = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/aws-service-role/apprunner.amazonaws.com/*"]
+  }
+
   # Read-only calls Terraform makes on every plan.
   statement {
     sid    = "ReadOnlyLookups"
