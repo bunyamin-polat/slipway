@@ -8,3 +8,6 @@ region  = "us-east-1"
 
 budget_limit_usd    = "10"
 budget_alert_emails = ["you@example.com"]
+
+# Only this repository can assume the GitHub Actions deploy role.
+github_repository = "you/slipway"

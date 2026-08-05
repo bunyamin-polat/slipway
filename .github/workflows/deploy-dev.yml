@@ -1,0 +1,85 @@
+name: Deploy dev
+
+# A merge to main redeploys dev. This is the whole claim of the repository — that the gap
+# between "merged" and "running" is a green check and nothing else.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  # Two applies against one state file is how a state file gets corrupted. Queue instead.
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: slipway-deploy-dev-${{ github.run_id }}
+
+      - name: Write the config that is deliberately not in git
+        run: |
+          cat > terraform/stacks/20_app/backend.hcl <<EOF
+          bucket       = "${{ secrets.TF_STATE_BUCKET }}"
+          key          = "20_app/terraform.tfstate"
+          region       = "${{ env.AWS_REGION }}"
+          encrypt      = true
+          use_lockfile = true
+          EOF
+          cp terraform/envs/dev.tfvars.example terraform/envs/dev.tfvars
+
+      - run: uv sync --locked
+
+      - name: Deploy
+        id: deploy
+        run: |
+          uv run python scripts/deploy.py dev --auto-approve
+          url=$(terraform -chdir=terraform/stacks/20_app output -raw url)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test
+        # The gate. It fails on a buffered response, which a status-code check would pass.
+        run: uv run python scripts/smoke.py dev --url "${{ steps.deploy.outputs.url }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### dev deployed"
+            echo ""
+            echo "- URL: ${{ steps.deploy.outputs.url }}"
+            echo "- Commit: \`${GITHUB_SHA::7}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

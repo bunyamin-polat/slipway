@@ -1,0 +1,121 @@
+name: Terraform plan
+
+# Posts the plan for dev as a comment on the pull request, so a change to infrastructure
+# is reviewed as a diff of resources rather than a diff of HCL. One screenshot of this
+# communicates more about how a team works than a paragraph claiming they do it.
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "scripts/**"
+      - "docker/**"
+      - "template/**"
+      - ".github/workflows/plan.yml"
+
+permissions:
+  id-token: write # required to request the OIDC token
+  contents: read
+  pull-requests: write # required to post the comment
+
+env:
+  AWS_REGION: us-east-1
+  ENVIRONMENT: dev
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: slipway-plan-${{ github.run_id }}
+
+      - name: Write the config that is deliberately not in git
+        # backend.hcl names the state bucket, which contains the account ID. The tfvars
+        # hold no secrets at all, so CI simply uses the committed example verbatim — which
+        # also means the examples cannot rot without CI noticing.
+        run: |
+          cat > terraform/stacks/20_app/backend.hcl <<EOF
+          bucket       = "${{ secrets.TF_STATE_BUCKET }}"
+          key          = "20_app/terraform.tfstate"
+          region       = "${{ env.AWS_REGION }}"
+          encrypt      = true
+          use_lockfile = true
+          EOF
+          cp terraform/envs/dev.tfvars.example terraform/envs/dev.tfvars
+
+      - name: Plan
+        id: plan
+        working-directory: terraform/stacks/20_app
+        run: |
+          terraform init -input=false -backend-config=backend.hcl
+          terraform workspace select -or-create "$ENVIRONMENT"
+          terraform plan -input=false -no-color \
+            -var-file=../../envs/dev.tfvars \
+            -var="image_tag=${GITHUB_SHA::7}" \
+            > plan.txt
+          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on the pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let plan = fs.readFileSync('terraform/stacks/20_app/plan.txt', 'utf8');
+
+            // GitHub rejects comments over 65536 characters. Keep the tail: the summary
+            // line at the bottom is the part anyone actually reads first.
+            const limit = 60000;
+            if (plan.length > limit) {
+              plan = '...truncated...\n' + plan.slice(-limit);
+            }
+
+            const body = [
+              '### Terraform plan — `dev`',
+              '',
+              '<details><summary>Show plan</summary>',
+              '',
+              '```terraform',
+              plan,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+
+            // Update the existing comment instead of adding one per push, so a long
+            // pull request does not become a wall of stale plans.
+            const marker = '### Terraform plan — `dev`';
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.data.find(
+              c => c.user.type === 'Bot' && c.body.startsWith(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

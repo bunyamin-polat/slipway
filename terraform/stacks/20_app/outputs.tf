@@ -3,6 +3,11 @@ output "environment" {
   value       = local.environment
 }
 
+output "account_id" {
+  description = "Account this environment lives in. Worth confirming before celebrating a prod deploy."
+  value       = data.aws_caller_identity.current.account_id
+}
+
 output "url" {
   description = <<-EOT
     The live URL — the whole point of the repository. CloudFront's domain when the CDN is

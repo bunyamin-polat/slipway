@@ -1,0 +1,106 @@
+name: Promote to prod
+
+# Manual, and gated. The `prod` environment in repository settings carries the required
+# reviewer, so this run pauses until a human approves it — the approval lives in GitHub's
+# settings rather than in this file, which is what makes it a control instead of a comment.
+#
+# It promotes an image that already exists, by tag. Nothing is rebuilt: the artifact that
+# was tested in dev is the artifact that reaches prod, which is the entire reason for
+# tagging images with a commit SHA.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to promote, e.g. 03b4c54. Must already be in ECR."
+        required: true
+        type: string
+      destroy_after:
+        description: "Destroy prod when the smoke test passes. Use this to demo without leaving it running."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+      url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: slipway-promote-${{ github.run_id }}
+
+      - name: Write the config that is deliberately not in git
+        run: |
+          cat > terraform/stacks/20_app/backend.hcl <<EOF
+          bucket       = "${{ secrets.TF_STATE_BUCKET }}"
+          key          = "20_app/terraform.tfstate"
+          region       = "${{ env.AWS_REGION }}"
+          encrypt      = true
+          use_lockfile = true
+          EOF
+          cp terraform/envs/prod.tfvars.example terraform/envs/prod.tfvars
+
+      - run: uv sync --locked
+
+      - name: Confirm the image exists before touching prod
+        run: |
+          aws ecr describe-images \
+            --repository-name slipway-app \
+            --image-ids imageTag="${{ inputs.image_tag }}" \
+            --query 'imageDetails[0].imagePushedAt' --output text
+
+      - name: Deploy
+        id: deploy
+        # --tag skips the build entirely: this promotes the exact image dev ran.
+        run: |
+          uv run python scripts/deploy.py prod --tag "${{ inputs.image_tag }}" --auto-approve
+          url=$(terraform -chdir=terraform/stacks/20_app output -raw url)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test
+        run: uv run python scripts/smoke.py prod --url "${{ steps.deploy.outputs.url }}"
+
+      - name: Destroy prod
+        if: ${{ inputs.destroy_after }}
+        # prod carries CloudFront, so this takes about fifteen minutes.
+        run: uv run python scripts/destroy.py prod --yes
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### prod"
+            echo ""
+            echo "- Image tag: \`${{ inputs.image_tag }}\`"
+            echo "- URL: ${{ steps.deploy.outputs.url }}"
+            echo "- Destroyed afterwards: ${{ inputs.destroy_after }}"
+          } >> "$GITHUB_STEP_SUMMARY"

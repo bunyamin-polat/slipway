@@ -57,6 +57,33 @@ variable "ecr_max_image_count" {
   default     = 10
 }
 
+variable "github_repository" {
+  description = <<-EOT
+    owner/repo that is allowed to assume the deploy role, e.g. "octocat/slipway".
+    The trust policy pins to this exact repository, so no other one — and no fork — can
+    assume it.
+  EOT
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^/]+/[^/]+$", var.github_repository))
+    error_message = "github_repository must be in owner/repo form."
+  }
+}
+
+variable "github_oidc_thumbprints" {
+  description = <<-EOT
+    Certificate thumbprints for GitHub's OIDC issuer. AWS stopped validating these for
+    token.actions.githubusercontent.com once it began trusting the issuer's root CA
+    directly, but the API still expects the field. These are the long-published values.
+  EOT
+  type        = list(string)
+  default = [
+    "6938fd4d98bab03faadb97b34396831e3780aea1",
+    "1c58a3a8518e8759bf075b76b750d4f2df264fcd",
+  ]
+}
+
 variable "ecr_force_delete" {
   description = <<-EOT
     Allow `terraform destroy` to delete the repository while it still contains images.

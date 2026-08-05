@@ -29,3 +29,12 @@ output "ecr_repository_name" {
   description = "Repository name, for the deploy scripts and the CI workflow."
   value       = aws_ecr_repository.app.name
 }
+
+output "github_actions_role_arn" {
+  description = <<-EOT
+    Role GitHub Actions assumes. Store it as the AWS_ROLE_ARN repository secret — not
+    because an ARN is secret, but because it names the account, which does not belong in
+    a public repository.
+  EOT
+  value       = aws_iam_role.github_actions.arn
+}
